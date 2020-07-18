@@ -15,8 +15,9 @@ import MapView, {
   PROVIDER_GOOGLE,
   Polyline,
 } from 'react-native-maps';
-import Geolocation from '@react-native-community/geolocation';
+import Geolocation from 'react-native-geolocation-service';
 import haversine from 'haversine';
+import PubNubReact from 'pubnub-react';
 
 const {width, height} = Dimensions.get('window');
 
@@ -26,9 +27,23 @@ const LONGITUDE = 51.5261059;
 const LATITUDE_DELTA = 0.0922;
 const LONGITUDE_DELTA = LATITUDE_DELTA * ASPECT_RATIO;
 
+// const pubnub = new PubNub({
+//   publishKey: 'pub-c-97a9ef79-a871-474c-987f-46ba162a9d65',
+//   subscribeKey: 'sub-c-fa1d39c8-c020-11ea-8089-3ec3506d555b',
+// });
+ 
+const channels = ['location'];
+ 
+
 export default class Map extends Component {
   constructor(props) {
     super(props);
+    
+    this.pubnub = new PubNubReact({
+      publishKey: 'pub-c-97a9ef79-a871-474c-987f-46ba162a9d65',
+      subscribeKey: 'sub-c-fa1d39c8-c020-11ea-8089-3ec3506d555b',
+    });
+
     this.state = {
       driver: props.route.params.driver,
       trip_id: '',
@@ -44,31 +59,38 @@ export default class Map extends Component {
         longitudeDelta: 0,
       }),
     };
-
+    this.pubnub = new PubNubReact({
+      publishKey: 'pub-c-97a9ef79-a871-474c-987f-46ba162a9d65',
+      subscribeKey: 'sub-c-fa1d39c8-c020-11ea-8089-3ec3506d555b',
+    });
+    this.pubnub.init(this);
     this._startdrive = this._startdrive.bind(this);
     this._enddrive = this._enddrive.bind(this);
   }
 
   componentDidMount() {
-    this.watchLocation();
-  }
-
-  watchLocation = () => {
-    const {routeCoordinates, distanceTravelled} = this.state;
+    //this.watchLocation();
     const {coordinate} = this.state;
+    // const locationConfig = {skipPermissionRequests:false,authorizationLevel:"whenInUse"}
+
+    // Geolocation.setRNConfiguration(locationConfig);
 
     this.watchID = Geolocation.watchPosition(
       position => {
         const {latitude, longitude} = position.coords;
+        const {routeCoordinates, distanceTravelled} = this.state;
 
-        const newCoordinate = {
-          latitude,
-          longitude,
-        };
+        // console.log('This position'+ routeCoordinates);
+        const newCoordinate = [
+          {
+            latitude,
+            longitude,
+          },
+        ];
 
         if (Platform.OS === 'android') {
           if (this.marker) {
-            this.marker._component.animateMarkerToCoordinate(
+            this.marker.animateMarkerToCoordinate(
               newCoordinate,
               500, // 500 is the duration to animate the marker
             );
@@ -81,12 +103,12 @@ export default class Map extends Component {
         this.setState({
           latitude: latitude,
           longitude: longitude,
-          routeCoordinates: routeCoordinates.concat([newCoordinate]),
+          routeCoordinates: routeCoordinates.concat(newCoordinate),
           distanceTravelled:
             distanceTravelled + this.calcDistance(newCoordinate),
           prevLatLng: newCoordinate,
         });
-        //console.log('km: '+this.state.distanceTravelled);
+        console.log('km: ' + JSON.stringify(this.state.routeCoordinates));
         //console.log(this.state.latitude+' , '+ this.state.longitude );
       },
       error => console.log(error),
@@ -97,7 +119,40 @@ export default class Map extends Component {
         distanceFilter: 1,
       },
     );
-  };
+  }
+
+  componentDidUpdate(prevProps, prevState) {
+    // const pubnub = usePubNub();
+    // const [latitude, longitude] = useState();
+   
+    // useEffect(() => {
+    //   pubnub.addListener({
+    //     message: messageEvent => {
+    //       setMessages([{lat: latitude, lng: longitude}]);
+    //     },
+    //   });
+   
+    //   pubnub.subscribe({ channels });
+    // }, [location]);
+   
+
+    if (this.props.latitude !== prevState.latitude) {
+      this.pubnub.publish({
+        message: {
+          driver_id: this.state.driver._id,
+          latitude: this.state.latitude,
+          longitude: this.state.longitude,
+        },
+        channel: 'location',
+      });
+      
+    }
+  }
+
+
+  componentWillUnmount() {
+    this.watchID != null && Geolocation.clearWatch(this.watchID);
+  }
 
   getMapRegion = () => ({
     latitude: this.state.latitude,
@@ -109,11 +164,11 @@ export default class Map extends Component {
   calcDistance = newLatLng => {
     const {prevLatLng} = this.state;
     // console.log('hav '+prevLatLng+'  '+ newLatLng);
-    return haversine(prevLatLng, newLatLng, {unit: 'meter'}) || 0;
+    return haversine(prevLatLng, newLatLng) || 0;
   };
 
   _startdrive() {
-    fetch('http://localhost:5000/drivers/trip/' + this.state.driver._id, {
+    fetch('http://192.168.100.33:5000/drivers/trip/' + this.state.driver._id, {
       method: 'POST',
       headers: {
         Accept: 'application/json',
@@ -143,23 +198,26 @@ export default class Map extends Component {
   }
 
   _enddrive() {
-    fetch('http://localhost:5000/drivers/endtrip/' + this.state.driver._id, {
-      method: 'POST',
-      headers: {
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
+    fetch(
+      'http://192.168.100.33:5000/drivers/endtrip/' + this.state.driver._id,
+      {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          trip_id: this.state.trip_id,
+          end_time: new Date(),
+          kilometers: this.state.distanceTravelled,
+          drivepaths: this.state.routeCoordinates,
+          location: {lat: this.state.latitude, lng: this.state.longitude},
+        }),
       },
-      body: JSON.stringify({
-        trip_id: this.state.trip_id,
-        endtime: new Date(),
-        kilometers: this.state.distanceTravelled,
-        drivepaths: this.state.routeCoordinates,
-        location: {lat: this.state.latitude, lng: this.state.longitude},
-      }),
-    })
+    )
       .then(response => response.json())
       .then(res => {
-        console.log(res);
+        console.log(res.driver.trips[res.driver.trips.length - 1].drivepaths);
         alert(res.msg);
       })
       .catch(error => {
