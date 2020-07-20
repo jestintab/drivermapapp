@@ -17,7 +17,8 @@ import MapView, {
 } from 'react-native-maps';
 import Geolocation from 'react-native-geolocation-service';
 import haversine from 'haversine';
-import PubNubReact from 'pubnub-react';
+import io from 'socket.io-client';
+
 
 const {width, height} = Dimensions.get('window');
 
@@ -27,22 +28,12 @@ const LONGITUDE = 51.5261059;
 const LATITUDE_DELTA = 0.0922;
 const LONGITUDE_DELTA = LATITUDE_DELTA * ASPECT_RATIO;
 
-// const pubnub = new PubNub({
-//   publishKey: 'pub-c-97a9ef79-a871-474c-987f-46ba162a9d65',
-//   subscribeKey: 'sub-c-fa1d39c8-c020-11ea-8089-3ec3506d555b',
-// });
- 
-const channels = ['location'];
- 
+
 
 export default class Map extends Component {
   constructor(props) {
     super(props);
-    
-    this.pubnub = new PubNubReact({
-      publishKey: 'pub-c-97a9ef79-a871-474c-987f-46ba162a9d65',
-      subscribeKey: 'sub-c-fa1d39c8-c020-11ea-8089-3ec3506d555b',
-    });
+  
 
     this.state = {
       driver: props.route.params.driver,
@@ -59,13 +50,14 @@ export default class Map extends Component {
         longitudeDelta: 0,
       }),
     };
-    this.pubnub = new PubNubReact({
-      publishKey: 'pub-c-97a9ef79-a871-474c-987f-46ba162a9d65',
-      subscribeKey: 'sub-c-fa1d39c8-c020-11ea-8089-3ec3506d555b',
-    });
-    this.pubnub.init(this);
+   
     this._startdrive = this._startdrive.bind(this);
     this._enddrive = this._enddrive.bind(this);
+
+    this.socket = io.connect('http://localhost:5100'); 
+    // this.socket.on('connect', () => {
+    //   setIsConnected(true);
+    // });
   }
 
   componentDidMount() {
@@ -122,31 +114,26 @@ export default class Map extends Component {
   }
 
   componentDidUpdate(prevProps, prevState) {
-    // const pubnub = usePubNub();
-    // const [latitude, longitude] = useState();
+  
    
-    // useEffect(() => {
-    //   pubnub.addListener({
-    //     message: messageEvent => {
-    //       setMessages([{lat: latitude, lng: longitude}]);
-    //     },
-    //   });
-   
-    //   pubnub.subscribe({ channels });
-    // }, [location]);
-   
+    this.socket.emit('position', {
+      driver_id: this.state.driver._id,
+        latitude: this.state.latitude,
+        longitude: this.state.longitude,
+    });
 
-    if (this.props.latitude !== prevState.latitude) {
-      this.pubnub.publish({
-        message: {
-          driver_id: this.state.driver._id,
-          latitude: this.state.latitude,
-          longitude: this.state.longitude,
-        },
-        channel: 'location',
-      });
+    // if (this.props.latitude !== prevState.latitude) {
       
-    }
+    //   this.pubnub.publish({
+    //     message: {
+    //       driver_id: this.state.driver._id,
+    //       latitude: this.state.latitude,
+    //       longitude: this.state.longitude,
+    //     },
+    //     channel: 'location',
+    //   });
+      
+    // }
   }
 
 
@@ -168,7 +155,7 @@ export default class Map extends Component {
   };
 
   _startdrive() {
-    fetch('http://192.168.100.33:5000/drivers/trip/' + this.state.driver._id, {
+    fetch('http://localhost:5000/drivers/trip/' + this.state.driver._id, {
       method: 'POST',
       headers: {
         Accept: 'application/json',
@@ -199,7 +186,7 @@ export default class Map extends Component {
 
   _enddrive() {
     fetch(
-      'http://192.168.100.33:5000/drivers/endtrip/' + this.state.driver._id,
+      'http://localhost:5000/drivers/endtrip/' + this.state.driver._id,
       {
         method: 'POST',
         headers: {
